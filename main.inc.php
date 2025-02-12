@@ -54,6 +54,8 @@ function wm_picture_write_metadata()
   if (isset($page['page']) and 'photo' == $page['page'] and isset($_GET['write_metadata']))
   {
     check_input_parameter('image_id', $_GET, false, PATTERN_ID);
+    $image = get_image_infos($_GET['image_id'], true);
+
     list($rc, $output) = wm_write_metadata($_GET['image_id']);
 
     if (count($output) == 0)
@@ -119,7 +121,9 @@ function wm_add_methods($arr)
 function wm_write_metadata($image_id)
 {
   global $conf, $logger;
-  
+
+  $has_md5sum_fs = pwg_db_num_rows(pwg_query('SHOW COLUMNS FROM `'.IMAGES_TABLE.'` LIKE "md5sum_fs" '));
+
   $query = '
 SELECT
     img.name,
@@ -129,14 +133,20 @@ SELECT
     GROUP_CONCAT(tags.name) AS tags,
     img.path,
     img.representative_ext
+    '.($has_md5sum_fs ? ', img.md5sum_fs' : '').'
   FROM '.IMAGES_TABLE.' AS img
     LEFT OUTER JOIN '.IMAGE_TAG_TABLE.' AS img_tag ON img_tag.image_id = img.id
     LEFT OUTER JOIN '.TAGS_TABLE.' AS tags ON tags.id = img_tag.tag_id
   WHERE img.id = '.$image_id.'
   GROUP BY img.id, img.name, img.comment, img.author, img.path, img.representative_ext
 ;';
-  $result = pwg_query($query);
-  $row = pwg_db_fetch_assoc($result);
+  $images = query2array($query);
+  if (count($images) == 0)
+  {
+    fatal_error(__FUNCTION__." photo ".$image_id." does not exist");
+  }
+
+  $row = $images[0];
 
   $name = wm_prepare_string($row['name'], 256);
   $description = wm_prepare_string($row['comment'], 2000);
@@ -198,6 +208,19 @@ SELECT
   $exec_return = exec($command, $output, $rc);
   // echo '$exec_return = '.$exec_return.'<br>';
   // echo '<pre>'; print_r($output); echo '</pre>';
+
+  $activity_details = array('function' => __FUNCTION__);
+
+  if ($has_md5sum_fs)
+  {
+    $md5sum = md5_file($row['path']);
+    single_update(IMAGES_TABLE, array('md5sum_fs' => $md5sum), array('id' => $image_id));
+
+    $activity_details['md5sum_fs_previous'] = $row['md5sum_fs'];
+    $activity_details['md5sum_fs_new'] = $md5sum;
+  }
+
+  pwg_activity('photo', $image_id, 'edit', $activity_details);
 
   // as derivatives may contain metadata, they must be reset
   delete_element_derivatives($row);
