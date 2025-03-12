@@ -25,6 +25,18 @@ function ws_images_writeMetadata($params, &$service)
   {
     return new PwgError(403, 'Invalid security token');
   }
+
+  // does the image really exist?
+  $query = '
+SELECT COUNT(*)
+  FROM '. IMAGES_TABLE .'
+  WHERE id = '. $params['image_id'] .'
+;';
+  list($count) = pwg_db_fetch_row(pwg_query($query));
+  if ($count == 0)
+  {
+    return new PwgError(404, 'image_id not found');
+  }
   
   wm_write_metadata($params['image_id']);
   
